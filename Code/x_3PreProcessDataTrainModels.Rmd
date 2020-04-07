@@ -1,0 +1,183 @@
+---
+title: "Version 2: Reduce Dimensionality"
+output: html_notebook
+---
+
+```{r}
+# create reproducable results from random sampling
+set.seed(234)
+# create 75% sample of row indices
+in_training <-createDataPartition(loadedData$USERID, p = .75, list = FALSE)
+# create 75% sample of data and save it to trainData
+trainData <- loadedData[in_training, ]
+ # create 25% sample of data and save it to test_data
+testData <- loadedData[-in_training, ]
+# verify split percentages
+nrow(trainData) / nrow(loadedData)
+nrow(testData) / nrow(loadedData)
+nrow(trainData)
+rm(in_training)
+```
+
+
+```{r}
+# split data, building 0, floor 0
+trainData_B0_FL0 <- trainData %>%
+  filter(BUILDINGID == 0, FLOOR == 0) %>%
+  select(-BUILDINGID,-FLOOR)
+# remove duplicates
+trainData_B0_FL0 <- trainData_B0_FL0 %>% distinct()
+# remove unused attributes
+trainData_B0_FL0 <- trainData_B0_FL0 %>%
+  select(-USERID,-PHONEID, -TIMESTAMP, - SPACEID, -RELATIVEPOSITION)
+# convert 100 to 999 as to not mess up -100s, when converting to abs
+trainData_B0_FL0[trainData_B0_FL0 == 100] <- 999
+#make negatives into positive, e
+col_start <- 1
+col_end <- ncol(trainData_B0_FL0)-4
+trainData_B0_FL0[,col_start:col_end] <- lapply(trainData_B0_FL0[,col_start:col_end], abs)
+
+# find minimums above 70
+mins <- sapply(trainData_B0_FL0, min)
+mins_df <- as.data.frame(mins, keep.rownames = TRUE)
+# uses data.table
+mins_df <- setDT(mins_df, keep.rownames = TRUE)
+mins_df_filtered <- mins_df %>% 
+  filter(rn !="LONGITUDE" & rn != "LATITUDE" & rn != "FLOOR", mins >= 70)
+mins_df_name_vec <- c(mins_df_filtered$rn)
+
+#remove all columns with minimum values greater than or equal to 70
+mins_df_name_vec <- c(mins_df_filtered$rn)
+trainData_B0_FL0 <- trainData_B0_FL0 %>% select(-mins_df_name_vec)
+
+# zero variance
+nearZeroVarResults <- nearZeroVar(trainData_B0_FL0, names = TRUE, freqCut = 3, uniqueCut = 10, saveMetrics = TRUE)
+nearZeroVarResults
+# Save zero variance variables into a vector
+zeroVAR <- which(nearZeroVarResults$zeroVar == TRUE, useNames = TRUE )
+# Remove WAP variables with zero variance
+#trainData_B0_FL0 <- trainData_B0_FL0[ , -zeroVAR]
+
+plot_B0_FL0 <- plot_ly(trainData_B0_FL0, x = ~LATITUDE, y = ~LONGITUDE, colors = c('#BF382A', '#0C4B8E'))
+plot_B0_FL0 <- plot_B0_FL0 %>% add_markers()
+plot_B0_FL0 <- plot_B0_FL0 %>% layout(title = "Building Zero", scene = list(xaxis = list(title = 'Latitude'),
+                     yaxis = list(title = 'Longitude'),
+                     zaxis = list(title = 'Floor Level', dtick = 1)))
+
+```
+
+
+## Combine Lat and Long into one variable, and make it categorical
+
+```{r}
+#uses dplyr
+trainData_B0_FL0 <- trainData_B0_FL0 %>% mutate( Long_Lat = paste(LONGITUDE, LATITUDE, sep=","))  %>% select(-LATITUDE, -LONGITUDE) 
+
+# turn LatLong into factor
+
+trainData_B0_FL0$Long_Lat <- as.factor(trainData_B0_FL0$Long_Lat)
+
+```
+
+```{r}
+# clean up environment
+rm(mins_df, mins_df_filtered, nearZeroVarResults, col_end, col_start, mins, mins_df_name_vec, zeroVAR)
+```
+
+
+# Which model should I use?
+
+C5.0, SVM/SVR, KNN, LM, Model Trees, RandomForest
+
+We have 36 predictor variables (WAPs), and 2 target variables (Latitude, Longitude).
+
+So, which model shoul we use?
+
+It's not a straight line or even a curve. Rather, would it be classification?
+
+
+Longitude and Latitude can be considered continous variables but for the purpose of this model, they are not continous. They cannot increase. The only values they can be are those picked up with the wifi access.
+
+```{r}
+names(trainData_B0_FL0)
+length(unique(trainData_B0_FL0$Long_Lat))
+length(unique(trainData_B0_FL0$Long_Lat))
+
+nrow(trainData_B0_FL0)
+```
+ With 805 instances in building 0, floor 0, there are only 54 unique options for latitute and longitude.
+ 
+If there are limited options, it is a classification problem. Therefore, we will only choose algorithms appropriate for classification.
+
+1. Linear Support Vector Machines
+2. KNeighbors Classifier
+  It's surprising that this one doesn't work that well.
+3. SVC or Ensemble Classifiers
+  I don't think this one will work well.  don't think there's much division. The points are very particular. Perhaps, if we were checking for something bigger, like which building are we in
+4. Maybe Naive Bayes
+
+
+# Test Model
+
+```{r}
+#my_data : trainData_B0_FL0
+
+# create 10-fold cross validation fitcontrol
+fitControl <- trainControl(method = "cv", number = 10)
+```
+
+```{r}
+# KNN
+kNN_B0_FL0 <- train(Long_Lat ~., data = trainData_B0_FL0, method = "knn",
+                trControl = fitControl)
+#prediction_kNN_B0_FL0  <- predict(kNN_B0_FL0, testData_B0_FL0)
+#postResample(prediction_kNN_B0_FL0, testData_B0_FL0$Long_Lat)
+
+```
+
+```{r}
+# SVM2
+sVM2_B0_FL0 <- train(Long_Lat ~., data = trainData_B0_FL0, method = "svmLinear2",
+                trControl = fitControl)
+#prediction_sVM2_B0_FL0  <- predict(sVM2_B0_FL0, testData_B0_FL0)
+#postResample(prediction_sVM2_B0_FL0, testData_B0_FL0$Long_Lat)
+
+```
+
+```{r}
+# randomforest
+rf_B0_FL0 <- train(Long_Lat ~., data = trainData_B0_FL0, method = "rf",
+                trControl = fitControl)
+```
+
+```{r}
+prediction_rf_B0_FL0  <- predict(rf_B0_FL0, testData_B0_FL0)
+#postResample(prediction_rf_B0_FL0, testData_B0_FL0$Long_Lat)
+```
+
+```{r}
+# c5
+c5_B0_FL0 <- train(Long_Lat ~., data = trainData_B0_FL0, method = "C5.0",
+                trControl = fitControl)
+#prediction_c5_B0_FL0  <- predict(c5_B0_FL0, testData_B0_FL0)
+#postResample(prediction_c5_B0_FL0, testData_B0_FL0$Long_Lat)
+```
+
+```{r}
+# gbm
+gbm_B0_FL0 <- train(Long_Lat ~., data = trainData_B0_FL0, method = "gbm",
+                trControl = fitControl)
+#prediction_gbm_B0_FL0  <- predict(gbm_B0_FL0, testData_B0_FL0)
+#postResample(prediction_gbm_B0_FL0, testData_B0_FL0$Long_Lat)
+```
+
+```{r}
+# svm polynomial
+svmPoly_B0_FL0 <- train(Long_Lat ~., data = trainData_B0_FL0, method = "svmPoly",
+                trControl = fitControl)
+#prediction_svmPoly_B0_FL0  <- predict(svmPoly_B0_FL0, testData_B0_FL0)
+#postResample(prediction_svmPoly_B0_FL0, testData_B0_FL0$Long_Lat)
+```
+
+
+We don't need to normalize because all predictors are already in same unit (WAPs)

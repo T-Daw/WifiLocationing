@@ -1,0 +1,157 @@
+---
+title: "prep Test Data"
+output: html_notebook
+---
+```{r}
+
+# create reproducable results from random sampling
+set.seed(234)
+# create 75% sample of row indices
+in_training <-createDataPartition(loadedData$USERID, p = .75, list = FALSE)
+# create 75% sample of data and save it to trainData
+trainData <- loadedData[in_training, ]
+ # create 25% sample of data and save it to test_data
+testData <- loadedData[-in_training, ]
+# verify split percentages
+nrow(trainData) / nrow(loadedData)
+nrow(testData) / nrow(loadedData)
+nrow(trainData)
+rm(in_training)
+```
+In our test data, we are only using the data that our train data used. 
+
+```{r}
+# split data, building 0, floor 0
+testData_B0_FL0 <- testData %>%
+  filter(BUILDINGID == 0, FLOOR == 0) %>%
+  select(-BUILDINGID,-FLOOR)
+
+# remove unused attributes
+testData_B0_FL0 <- testData_B0_FL0 %>%
+  select(-USERID,-PHONEID, -TIMESTAMP, - SPACEID, -RELATIVEPOSITION)
+# convert 100 to 999 as to not mess up -100s, when converting to abs
+testData_B0_FL0[testData_B0_FL0 == 100] <- 999
+#make negatives into positive, e
+col_start <- 1
+col_end <- ncol(testData_B0_FL0)-4
+testData_B0_FL0[,col_start:col_end] <- lapply(testData_B0_FL0[,col_start:col_end], abs)
+
+```
+
+```{r}
+#uses dplyr
+testData_B0_FL0 <- testData_B0_FL0 %>% mutate( Long_Lat = paste(LONGITUDE,LATITUDE, sep=","))  %>% select(-LATITUDE, -LONGITUDE)
+testData_B0_FL0$Long_Lat <- as.factor(testData_B0_FL0$Long_Lat)
+
+```
+
+```{r}
+#keep only WAP attributes that are in trainData
+testData_B0_FL0 <- testData_B0_FL0[,names(trainData_B0_FL0)]
+```
+
+
+# Model Formula
+
+```{r}
+ModelData <- resamples(list(svMLinear = sVM2_B0_FL0, svmPolynomial = svmPoly_B0_FL0,kNN = kNN_B0_FL0, C50 = c5_B0_FL0, gradientBoostMachine = gbm_B0_FL0, randomForest = rf_B0_FL0))
+summary(ModelData)
+```
+
+
+# Look at Random Forest Model and find difference 
+
+Random Forest Model Objects: 
+
+Prediction results: prediction_rf_B0_FL0
+Observed Values: testData_B0_FL0$Long_Lat
+
+```{r}
+# turn rm_predictions into character stirng first
+rm_pred <- as.character(prediction_rf_B0_FL0)
+```
+
+
+
+```{r}
+#split rm_predictions from character string into individual columns
+# turn into dataframe
+rm_pred <- as.data.frame(str_split_fixed(rm_pred, ",", 2))
+
+# turn into character...again
+rm_pred$V1 <- as.character(rm_pred$V1)
+rm_pred$V2 <- as.character(rm_pred$V2)
+
+#now try to turn into number
+rm_pred$V1 <- as.numeric(rm_pred$V1)
+rm_pred$V2 <- as.numeric(rm_pred$V2)
+colnames(rm_pred)[1] <- "Pred_LONG"
+colnames(rm_pred)[2] <- "Pred_LAT"
+
+rm_pred
+```
+
+```{r}
+# observed values
+
+# turn rm_predictions into character stirng first
+test_observed <- as.character(testData_B0_FL0$Long_Lat)
+
+#split testData Observed from character string into individual columns
+# turn into dataframe
+test_observed <- as.data.frame(str_split_fixed(testData_B0_FL0$Long_Lat, ",", 2))
+
+# turn into character...again
+test_observed$V1 <- as.character(test_observed$V1)
+test_observed$V2 <- as.character(test_observed$V2)
+
+#now try to turn into number
+test_observed$V1 <- as.numeric(test_observed$V1)
+test_observed$V2 <- as.numeric(test_observed$V2)
+colnames(test_observed)[1] <- "Test_LONG"
+colnames(test_observed)[2] <- "Test_LAT"
+
+test_observed
+```
+
+
+```{r}
+test_pred <- cbind(rm_pred,test_observed)
+test_pred <- test_pred %>% mutate( LONG_Stat = (Pred_LONG == Test_LONG), LAT_Stat = (Pred_LAT ==Test_LAT )) %>% filter (LONG_Stat == FALSE & LAT_Stat == FALSE) %>% mutate(Diff_LONG = Pred_LONG-Test_LONG, Diff_LAT = Pred_LAT - Test_LAT) %>% mutate(Diff_Squared = abs(Diff_LONG)*abs(Diff_LAT))
+```
+
+```{r}
+sort(test_pred$Diff_Squared)
+```
+
+
+
+
+```{r}
+
+pred_obs_df <- as.data.table(cbind(testData_B0_FL0$ObservedValues,as.character(prediction_rf_B0_FL0)))
+```
+
+```{r}
+#setnames(pred_obs_df,"Observed","Predicted")
+colnames(pred_obs_df) <- c("Observed", "Predicted")
+```
+
+```{r}
+# uses library(stringr)
+#pred_obs_df <- pred_obs_df %>% mutate(check = strsplit(Observed, ","))
+
+pred_obs_df <- pred_obs_df %>% mutate(check = (Observed == Predicted)) %>% filter(check == FALSE) 
+
+#pred_obs_df_FILTER <- pred_obs_df %>% select(-check) %>% mutate(long = 
+
+
+pred_obs_df <- str_split_fixed(pred_obs_df$Observed, ",", 2)
+
+#tidyr::separate(pred_obs_df, c("Observed_Long","Observed_Lat","Predicted_Long","Predicted_Lat"))
+
+#str_split_fixed(pred_obs_df$Observed, ",", 2)
+
+
+```
+

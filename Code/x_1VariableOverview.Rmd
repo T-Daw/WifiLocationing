@@ -1,0 +1,256 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+
+Install packages and load libraries.
+```{r}
+install.packages("caret")
+```
+
+```{r}
+library(caret)
+```
+
+
+# Obtain Data
+Create train and test data.
+
+http://archive.ics.uci.edu/ml/datasets/UJIIndoorLoc
+
+From the documentation:
+"The UJIIndoorLoc database covers three buildings of Universitat Jaume I with 4 or more floors and almost 110.000m2. It can be used for classification, e.g. actual building and floor identification, or regression, e.g. actual longitude and latitude estimation. It was created in 2013 by means of more than 20 different users and 25 Android devices. The database consists of 19937 training/reference records (trainingData.csv file) and 1111 validation/test records (validationData.csv file). 
+
+The 529 attributes contain the WiFi fingerprint, the coordinates where it was taken, and other useful information.
+
+Each WiFi fingerprint can be characterized by the detected Wireless Access Points (WAPs) and the corresponding Received Signal Strength Intensity (RSSI). The intensity values are represented as negative integer values ranging -104dBm (extremely poor signal) to 0dbM. The positive value 100 is used to denote when a WAP was not detected. During the database creation, 520 different WAPs were detected. Thus, the WiFi fingerprint is composed by 520 intensity values.
+
+Then the coordinates (latitude, longitude, floor) and Building ID are provided as the attributes to be predicted.
+
+Additional information has been provided.
+
+The particular space (offices, labs, etc.) and the relative position (inside/outside the space) where the capture was taken have been recorded. Outside means that the capture was taken in front of the door of the space.
+
+Information about who (user), how (android device & version) and when (timestamp) WiFi capture was taken is also recorded.
+
+
+we expect that the user is at the same location as the mobile device
+
+WLAN Fingerprint-based positioning systems are based on
+the Received Signal Strength Indicator (RSSI) value.
+
+
+```{r}
+loadedData <- read.csv("trainingData.csv")
+```
+
+```{r}
+# create reproducable results from random sampling
+set.seed(234)
+# create 75% sample of row indices
+in_training <-createDataPartition(loadedData$USERID, p = .75, list = FALSE)
+# create 75% sample of data and save it to trainData
+trainData <- loadedData[in_training, ]
+ # create 25% sample of data and save it to test_data
+testData <- loadedData[-in_training, ]
+# verify split percentages
+nrow(trainData) / nrow(loadedData)
+nrow(testData) / nrow(loadedData)
+nrow(trainData)
+rm(in_training)
+```
+
+
+```{r}
+# load data to apply model on
+validateData <- read.csv("validationData.csv")
+```
+
+
+
+# Understand Variables
+
+This database is focused on WLAN fingerprint-based ones (also know as WiFi Fingerprinting)
+
+```{r}
+colnames(trainData)
+```
+
+```{r}
+summary(trainData[,520:529])
+```
+
+## Describe Variables
+Describe variables and variable types ( continous, discrete, ordinal, nominal)
+For categorical variables, look at classes
+For numerical variables, summary statistics: count, mean, standard deviation, min, and max
+Identify predictor and target variables
+
+From the documentation: 
+This dataset uses infrastructure-less fingerprint-based indoor localization, which uses the already available wireless signals (WLAN access points (WAPs)) to profile a location, taking advantage of the powerful mobile phones sensors. 
+
+
+```{r}
+print(trainData[1:5,520:529])
+```
+
+```{r}
+#No NAs in data
+sum(is.na(trainData))
+```
+
+
+### WAP 1-520
+
+These refer to the wireless access points. There are 520 access points in this dataset. The record the RSSI levels, which orrespond to negative integer values measured in dBm, where −100dBm is equivalent to a very weak signal, whereas 0dBM means that the detected WAP has an extremely good signal.
+
+When a WAP was not detected, it was given the default value of 100 dBm.
+
+###Longitude, Latitude
+
+```{r}
+sort(unique(trainData$LONGITUDE))
+```
+
+```{r}
+sort(unique(trainData$LATITUDE))
+```
+
+
+```{r}
+hist(trainData$LONGITUDE)
+```
+
+
+
+
+
+
+
+###BuildingID,Floor 
+```{r}
+sort(unique(trainData$FLOOR))
+```
+
+Data were collected at three multi-floor buildings of the Jaume I University. It is an
+integer value (from 0 to 2) that corresponds to the building in which the capture was taken.
+
+```{r}
+sort(unique(trainData$BUILDINGID))
+```
+
+### Space ID, Relative Position
+```{r}
+sort(unique(trainData$SPACEID))
+```
+
+SpaceID and contains a single integer value that, in
+this case, is used to identify the particular space (offices, labs,
+etc.) where the capture was taken. 
+
+
+Note from article:
+"As Section III-B describes, the database is split into two
+subsets: the training subset and the validation subset. In the
+training subset, the reference points are well-specified, being
+these points captured by, at least, two users. However, in the
+validation subset, the measures were taken at arbitrary points as
+would happen in a real localization system and, for this reason,
+these reference points (identified by SpaceID and Relative
+position) are not stored in the validation records. This fact
+is denoted by assigning the default value 0 to both fields."
+
+The relative position with respect to the space is also provided in the 526 position and it denotes if the capture was taken inside (value 1) or outside (value 2) the space at the corridor.
+
+In the training subset, the reference points are well-specified, being these points captured by, at least, two users. However, in the validation subset, the measures were taken at arbitrary points as would happen in a real localization system and, for this reason, these reference points (identified by SpaceID and Relative position) are not stored in the validation records. This fact is denoted by assigning the default value 0 to both fields
+
+Based on this, I don't think we should use SpaceID in our model. 
+
+
+
+```{r}
+sort(unique(trainData$RELATIVEPOSITION))
+
+```
+We will remove relative Position and Space from the Dataset
+####UserID
+
+This value is used to represent the 18 different users who participated in the procedure to generate the training samples. This field has not been recorded in the validation phase, so the default value 0
+is used to denote it. The height of each user is also provided. This information could be useful because the concrete spatial position of the device has a direct impact on the measuredRSSI values
+
+```{r}
+sort(unique(trainData$USERID))
+```
+
+Data was collected from 20 users and 25 devices. Some users used more than one device.
+
+###PhoneID
+contains an integer value to represent the Android device used in each capture. Two users shared a phone, and a few users has the same time of phone.
+
+PhoneID Android Device Android Ver. UserID
+0 Celkon A27 4.0.4(6577) 0
+1 GT-I8160 2.3.6 8
+2 GT-I8160 4.1.2 0
+3 GT-I9100 4.0.4 5
+4 GT-I9300 4.1.2 0
+5 GT-I9505 4.2.2 0
+6 GT-S5360 2.3.6 7
+7 GT-S6500 2.3.6 14
+8 Galaxy Nexus 4.2.2 10
+9 Galaxy Nexus 4.3 0
+10 HTC Desire HD 2.3.5 18
+11 HTC One 4.1.2 15
+12 HTC One 4.2.2 0
+13 HTC Wildfire S 2.3.5 0,11
+14 LT22i 4.0.4 0,1,9,16
+15 LT22i 4.1.2 0
+16 LT26i 4.0.4 3
+17 M1005D 4.0.4 13
+18 MT11i 2.3.4 4
+19 Nexus 4 4.2.2 6
+20 Nexus 4 4.3 0
+21 Nexus S 4.1.2 0
+22 Orange Monte Carlo 2.3.5 17
+23 Transformer TF101 4.0.3 2
+24 bq Curie 4.1.1 12
+
+We may consider shortening this. We don't need a phone id for each user. We would probably be more interested in the phone type. 
+
+```{r}
+sort(unique(trainData$PHONEID))
+```
+
+
+###Timestamp
+the time
+(in Unix time format) in which the capture was taken
+
+time was set by a centralized server to avoid outliers.
+
+
+```{r}
+head(trainData$TIMESTAMP)
+```
+
+The timestamps provided by each device is not recorded because the device’s timing settings could be different and we could not trust on the time provided by them
+
+
+###Other notes:
+
+Although both the training subset and the validation subset contain the same information, the latter includes the value 0 in some fields. These fields are: SpaceID, Relative Position with respect to SpaceID and UserID. As it has been commented before, this information was not recorded because the validation captures were taken at arbitrary points and the users were not tracked in this phase. This fact tries to simulate a real localization system.
+
+Because these variables are not present in our test data, we will not include them as predictor variables in our model.
+
+Variable to remove from test data: UserID, SpaceID, Relative Position
+## Check Distributions
+ We will look for outliers, missing values, and human error.
+# Clean Data Set
+Remove redundant variables, columns with too many nulls, rows with nulls, outliers 
+## Change Variable Types
+# Analyze Relationship Between Variables
+Look at correlation matrix and heatmap
+Look at scatterplots of variables ( see if you can make a pair plot, lookating at scatterplots of all your variables sns.pairplot() in Python)
+Look at histograms (numerical),boxplots, countplots(categorical)
