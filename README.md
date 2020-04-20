@@ -17,4 +17,4 @@ Accuracy and Kappa scores for all models ran.
 Raw outputs for all models ran. 
 
 ## 5. FinalReport.pdf
-Formal written technical report explaining results, model selected, and business recommendation. 
+Formal written technical report explaining results, model selected, and business recommendations.
